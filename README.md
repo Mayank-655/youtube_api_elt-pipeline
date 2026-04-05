@@ -1,59 +1,80 @@
-# YouTube API → ELT pipeline
+# **YouTube API — ELT Pipeline**
 
-End-to-end data pipeline: extract channel/video metadata from the **YouTube Data API**, orchestrate with **Apache Airflow** (Celery + Redis), load into **PostgreSQL** (`staging` / `core` schemas), and run **SODA** data-quality checks. **Docker Compose** packages the stack; **GitHub Actions** builds the image and runs tests.
+## **Architecture**
 
-## Architecture
+Diagrams and service topology are documented in [**docs/ARCHITECTURE.md**](docs/ARCHITECTURE.md).
 
-See **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** for diagrams, services, and data flow.
+## **Overview**
 
-Optional: add a high-level diagram image here, for example `docs/images/architecture.png`, and reference it below.
+A containerized **ELT-style** pipeline that ingests YouTube channel metadata and video statistics, orchestrates workloads with **Apache Airflow**, persists data in **PostgreSQL** staging and core layers, and validates quality with **SODA**. The stack is defined with **Docker Compose**; **GitHub Actions** automates image builds and test runs.
 
-```markdown
-![Architecture](docs/images/architecture.png)
-```
+## **Data source**
 
-## Screenshots
+The pipeline uses the **YouTube Data API**. Channel scope is driven by configuration (handle / channel identity). The following fields are modeled end-to-end:
 
-Add images under `docs/images/` (e.g. Airflow DAG graph, successful run, staging/core tables in your SQL client) and link them here for recruiters.
+- Video ID  
+- Title  
+- Upload date  
+- Duration  
+- View count  
+- Like count  
+- Comment count  
 
-| Area        | Suggested capture                          |
-|------------|-----------------------------------------------|
-| Airflow    | DAG grid, task graph, successful `produce_json` run |
-| Warehouse  | `staging.yt_api` / `core.yt_api` sample rows   |
-| Data quality | SODA scan success in task logs              |
+Staging retains API-shaped values; core applies typed columns and derived attributes (e.g. duration as time, video category such as Shorts vs normal length).
 
-Example:
+## **Pipeline summary**
 
-```markdown
-![DAG overview](docs/images/airflow-dag.png)
-```
+1. **Extract** — Python tasks call the YouTube API and write structured JSON extracts.  
+2. **Load (staging)** — JSON is loaded into a **staging** schema in PostgreSQL (`yt_api`).  
+3. **Transform & load (core)** — Rows are transformed and merged into a **core** schema for analytics-oriented consumption.  
+4. **Quality** — SODA scans run against both layers (missing keys, duplicates, basic consistency checks).  
 
-## Tech stack
+Initial runs perform full loads; subsequent scheduled runs **upsert** mutable metrics and reconcile deletions relative to the latest API snapshot.
 
-- **Python**, **Docker**, **Docker Compose**
-- **Apache Airflow** 2.9.x (CeleryExecutor, Redis)
-- **PostgreSQL** 13 (Airflow metadata, Celery backend, `elt_db`)
-- **SODA** (checks in `include/soda/`)
-- **pytest**, **GitHub Actions** (`.github/workflows/ci-cd.yaml`)
+## **Tools & technologies**
 
-## Quick start (local)
+| Layer | Stack |
+|--------|--------|
+| *Containerization* | **Docker**, **Docker Compose** |
+| *Orchestration* | **Apache Airflow** (CeleryExecutor, **Redis**) |
+| *Warehouse* | **PostgreSQL** 13 |
+| *Languages* | **Python**, **SQL** |
+| *Data quality* | **Soda Core** (Postgres) |
+| *Testing* | **pytest** |
+| *CI/CD* | **GitHub Actions** |
 
-1. Copy **`.env.example`** → **`.env`** and set secrets, API key, channel handle, Docker image coordinates, and `FERNET_KEY`.
-2. Build the custom Airflow image (match `DOCKERHUB_NAMESPACE` / `DOCKERHUB_REPOSITORY` / `IMAGE_TAG` in `.env`).
-3. `docker compose up -d`
-4. Open **http://localhost:8080**, unpause DAGs, run or wait for the schedule.
+## **Containerization**
 
-Do **not** commit `.env` (it is gitignored).
+The project extends the official **Airflow Docker** baseline with a custom image (`Dockerfile` + `requirements.txt`). Compose brings up Airflow webserver, scheduler, Celery workers, Redis, and PostgreSQL. Airflow connections and variables are supplied via environment variables (`AIRFLOW_CONN_*`, `AIRFLOW_VAR_*`); sensitive values are kept out of version control (`.env`, not committed). A Fernet key is used for Airflow’s internal secret handling.
 
-## Repository layout
+## **Orchestration**
 
-| Path | Role |
-|------|------|
-| `dags/` | DAG definitions (`produce_json`, `update_db`, `data_quality`) and Python modules |
-| `docker/postgres/` | Multi-database init for Airflow + `elt_db` |
-| `include/soda/` | SODA configuration and checks |
-| `tests/` | Unit, functional, integration, and e2e-style tests |
+Three DAGs run in sequence (extract → warehouse load → quality):
 
-## License
+| DAG | Role |
+|-----|------|
+| *produce_json* | Fetches from the API and materializes JSON under the Airflow data volume. |
+| *update_db* | Loads staging, transforms, and refreshes core tables. |
+| *data_quality* | Executes SODA scans on staging and core. |
 
-Add a `LICENSE` file if you want to specify terms for reuse of this portfolio project.
+The Airflow UI is available at `http://localhost:8080` when the stack is running locally.
+
+## **Data storage**
+
+Warehouse data lives in PostgreSQL (`elt_db`), with **staging** and **core** schemas. The same database host also hosts Airflow metadata and Celery result backends (separate databases). Data can be inspected with `psql`, **DBeaver**, or any Postgres client pointed at the composed service.
+
+## **Testing**
+
+Automated tests cover Airflow DAG loading, connection configuration, pure Python warehouse helpers, optional integration checks against the API and database, and lightweight CLI-level validation where the runtime allows. **SODA** enforces checks in the `data_quality` DAG.
+
+## **CI/CD**
+
+**GitHub Actions** (`.github/workflows/ci-cd.yaml`) builds and pushes the custom image when relevant files change, brings up Compose on the runner with injected secrets, runs **pytest**, and optionally runs Airflow DAG smoke tests. Manual workflow dispatch supports skipping CLI DAG tests when the environment has no same-day extract file.
+
+## **Portfolio artifacts**
+
+Screenshots and architecture graphics live under **`docs/images/`** (Airflow DAG views, successful runs, warehouse samples).
+
+---
+
+*Private portfolio project — configuration via `.env.example`; secrets are not stored in the repository.*
