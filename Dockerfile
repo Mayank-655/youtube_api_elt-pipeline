@@ -1,0 +1,12 @@
+ARG AIRFLOW_VERSION=2.9.2
+ARG PYTHON_VERSION=3.10
+
+FROM apache/airflow:${AIRFLOW_VERSION}-python${PYTHON_VERSION}
+
+ENV AIRFLOW_HOME=/opt/airflow
+
+COPY requirements.txt /requirements.txt
+RUN pip install --no-cache-dir -r /requirements.txt
+
+# DAGs (compose also bind-mounts ./dags; this keeps the image self-consistent for builds)
+COPY dags/ /opt/airflow/dags/

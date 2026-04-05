@@ -1,0 +1,5 @@
+requests==2.32.3
+python-dotenv==1.0.1
+apache-airflow-providers-postgres>=5.10.0,<6.0.0
+soda-core-postgres==3.3.14
+pytest==8.3.3
