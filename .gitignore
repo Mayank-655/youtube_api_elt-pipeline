@@ -11,3 +11,6 @@ data/video_ids.json
 /channel_response.json
 /video_data.json
 /video_ids.json
+
+# Private interview prep (keep local only)
+docs/INTERVIEW_PREP.md
